@@ -1,0 +1,124 @@
+---
+title: "Data_exploration"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Data set
+
+### Inspection
+
+```{r}
+library("tidyverse")
+
+abalone = read.csv("abalone.data",
+                   col.names = c("Sex", "Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "Rings"))
+
+abalone = abalone %>% mutate(
+  Sex = case_when(
+    Sex == "M" ~ "Male",
+    Sex == "F"~ "Female",
+    Sex == "I" ~ "Infant"
+  ),
+  Age = Rings + 1.5
+)
+
+head(abalone)
+```
+
+```{r}
+abalone %>% nrow()
+```
+
+There is 4176 rows in total.
+
+### Data cleansing
+
+After comparing these `*Weight` columns for a while, I found a few anomaly data:
+
+```{r}
+abalone[(abalone$WholeWeight < abalone$ShuckedWeight), ]
+```
+
+These four rows has the weight of the whole abalone less than the weight of their meat that is likely to be a typo in the data.
+
+I also found a similar anomaly:
+
+```{r}
+abalone[(abalone$WholeWeight < abalone$ShellWeight), ]
+```
+
+The whole weight of this row is less than its weight after it's being dried, which is extremely unlikely to happen, if not impossible.
+
+I also found two rows that has their `Height` equals to 0:
+
+```{r}
+abalone[abalone$Height <= 0, ]
+```
+
+The second row '3996' is also the one that has its whole weight less than its shell weight.
+
+To obtain a useful database, these anomalies are removed from the data frame:
+
+```{r}
+abalone = abalone %>% filter(WholeWeight > ShuckedWeight, WholeWeight > ShellWeight, Height > 0)
+save(abalone, file="abaloneClean.rda")
+nrow(abalone)
+```
+
+After the data cleansing, 6 rows are removed in total.
+
+### Explore correlation matrix
+
+```{r}
+library("qtlcharts")
+
+qtlcharts::iplotCorr(abalone[, c("Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "Age")])
+```
+
+After exploring the correlation matrix above, it seems that no variable has a linear relationship with `Age`.
+
+Thus it is necessary to try `log(Age)`:
+
+```{r}
+abalone$lAge = log(abalone$Age)
+head(abalone)
+```
+
+Now try the correlation matrix again:
+
+```{r}
+qtlcharts::iplotCorr(abalone[, c("Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "lAge")])
+```
+
+However, it is a possible that for each `Sex`, there is a relationship between `Age` or `log(Age)` to other variable, so lets try again:
+
+For male:
+
+```{r}
+qtlcharts::iplotCorr(abalone[abalone$Sex == "Male",
+                             c("Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "Age", "lAge")])
+```
+
+For female:
+
+```{r}
+qtlcharts::iplotCorr(abalone[abalone$Sex == "Female",
+                             c("Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "Age", "lAge")])
+```
+
+For infant:
+
+```{r}
+qtlcharts::iplotCorr(abalone[abalone$Sex == "Infant",
+                             c("Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "Age", "lAge")])
+```
+
+Unfortunately, in none of the `Sex` in `abalone` does `Age` or `lAge` have any linear relationship with any other variable.
+
+Thus, we have to explore other relationship.M
+

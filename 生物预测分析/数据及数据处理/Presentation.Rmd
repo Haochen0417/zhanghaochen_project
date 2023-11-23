@@ -1,0 +1,663 @@
+---
+title: "DATA2X02 Presentation"
+subtitle: "Abalone Data"
+author: 'T09ol_ontime_5'
+date: "12/11/2020"
+output: 
+  ioslides_presentation:
+    incremental: true
+bibliography: Presentation_Bibliography.bib
+
+---
+
+
+
+```{r setup, include=FALSE, echo=FALSE, message=FALSE}
+# Press 'w' for widescreen
+# Press 'f' for fullscreen
+# Open in a web browser for these to work
+
+
+knitr::opts_chunk$set(echo = TRUE)
+library("tidyverse")
+library("kableExtra")
+library("qtlcharts")
+library("ggExtra")
+library("ggplot2")
+library("ggfortify")
+library("gridExtra")
+library("cowplot")
+library("leaps")
+library("mplot")
+library("caret")
+
+lib_list = c("tidyverse","kableExtra","qtlcharts","ggExtra","ggplot2","gridExtra","ggfortify","cowplot","leaps","mplot", "caret")
+citation_libraries = sapply(lib_list, function(x) citation(x) %>% toBibtex())
+print_cited_libraries = function(libs){
+  for(x in libs){
+    print(x)
+  }
+}
+```
+
+
+# Initial Data Analysis
+
+## Data Inspection {.build} 
+```{r Data Inspection, echo=FALSE, message=FALSE}
+
+
+abalone = read.csv("abalone.data",
+                   col.names = c("Sex", "Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "Rings"))
+
+abalone = abalone %>% mutate(
+  Sex = case_when(
+    Sex == "M" ~ "Male",
+    Sex == "F"~ "Female",
+    Sex == "I" ~ "Infant"
+  ),
+  Age = Rings + 1.5
+)
+
+
+table = head(abalone, 5) %>% t()
+colnames(table) = rep('', dim(table)[2])
+(table %>%
+  t() %>%
+  cbind(rownames(.),Entries=.))[, -1] %>%
+  kbl(caption = paste0('<div style="text-align: center"><b>First 5 Entries Of Data </b></div>'), format='html', row.names = FALSE) %>%
+  kable_classic_2(full_width=TRUE, font_size = 11) %>%
+  column_spec(1, bold = T, border_right = T) %>%
+  column_spec(1:dim(table)[2], width='1.5cm') %>%
+  row_spec(0, font_size = 11) %>%
+  footnote(general=paste('There are', abalone %>% nrow(), 'entries in this dataset and', abalone %>% ncol(), 'variables.'))
+```
+
+<br>Dataset comes from an original study [@warwick_j_nash_population_1994]</br>
+
+## Data Cleaning {.build} 
+
+Some anomalies in the data were discovered:
+
+
+```{r, echo=FALSE, message=FALSE}
+abalone[(abalone$WholeWeight < abalone$ShuckedWeight), c(5,6)] %>% 
+  kbl(format='html', row.names = FALSE) %>%
+  kable_classic_2(full_width=FALSE, font_size = 9) %>%
+  column_spec(1:2, width='1cm') %>%
+  row_spec(0, font_size = 11) %>%
+  footnote(general='Weight of the whole abalone was less than the weight of its meat.')
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+abalone[(abalone$WholeWeight < abalone$ShellWeight), c(5,8)] %>% 
+  kbl(format='html', row.names = FALSE) %>%
+  kable_classic_2(full_width=FALSE, font_size = 11) %>%
+  column_spec(1:2, width='1cm') %>%
+  row_spec(0, font_size = 11) %>%
+  footnote(general='Weight of the whole abalone was less than the weight of its shell.')
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+abalone[(abalone$WholeWeight < abalone$ShellWeight), c(2,3,4)] %>% 
+  kbl(format='html', row.names = FALSE) %>%
+  kable_classic_2(full_width=FALSE, font_size = 11) %>%
+  column_spec(1, width='1cm') %>%
+  row_spec(0, font_size = 11) %>%
+  footnote(general='Height of abalone was 0.')
+```
+
+
+
+```{r, echo=FALSE, message=FALSE}
+abaloneClean = abalone %>% filter(WholeWeight > ShuckedWeight, WholeWeight > ShellWeight, Height > 0)
+save(abaloneClean, file="abaloneClean.rda")
+cat("As a result of cleaning,",nrow(abalone)-nrow(abaloneClean),"rows were removed.")
+abalone = abaloneClean
+```
+
+## Data Exploration (i)
+
+
+<center>Correlation Heatmap Of Abelone Data   </center>
+```{r, echo=FALSE, message=FALSE}
+setScreenSize("large")
+qtlcharts::iplotCorr(abalone[, c("Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "Age")],
+                     chartOpts=list(height=300, 
+                                    width=600,
+                                    margin = list(left=125, top=40, right=5, bottom=70, inner=5)
+                                    )
+                     )
+```
+
+
+## Data Exploration (ii)
+
+
+<center>Correlation Heatmap Of Abelone Data (log Age)</center>
+```{r, echo=FALSE, message=FALSE}
+setScreenSize("large")
+abalone$logAge = log(abalone$Age)
+qtlcharts::iplotCorr(abalone[, c("Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "logAge")],
+                     chartOpts=list(height=300, 
+                                    width=600,
+                                    margin = list(left=125, top=40, right=5, bottom=70, inner=5)
+                                    )
+                     )
+```
+
+## Data Exploration (iii)
+
+<center>Checking For Similarity Of Distribution Between Infants/Males/Females</center>
+<br></br>
+```{r, echo=FALSE, message=FALSE}
+predictors = colnames(abalone %>% select(-Sex, -Age))
+weights = c("WholeWeight", "ShellWeight", "ShuckedWeight", "VisceraWeight")
+abalone = abalone %>% mutate(Sex = factor(Sex))
+get_aov = function(data, predictor, given){
+  eq = paste0(predictor, paste0("~",given)) %>% as.formula()
+  av = aov(eq, data = data)
+  av %>% summary() %>% unlist() %>% as.data.frame() %>% t()
+}
+row_names = c("d.f.","Df2","Sum Sq.","Sum Sq2","Mean Sq.","Mean Sq2","F value","F value2","p-value","Pr(>F)2")
+anova_results = sapply(predictors, FUN=function(x) get_aov(data=abalone, predictor=x, given="Sex"))
+rownames(anova_results) = row_names
+anova_results = anova_results %>% t()
+anova_results[,'p-value'] = sapply(anova_results[,'p-value'], FUN=function(x) if(round(x,5)==0){paste("<0.0001")} else{paste0("~",round(x,5))})
+anova_results[,c(2:7)] = sapply(anova_results[,c(2:7)], function(x) round(x %>% as.numeric(),4))
+anova_results[,c(1,3,5,7,9)] %>% 
+  kable(format='html',caption='ANOVA Results Of Variables By Sex') %>%
+  kable_styling(font_size = 11) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(6,background = "lightblue") %>%
+  footnote(general = "All variables were significantly different in distribution mean when seperated by sex (significant p-values highlighted). All entries were rounded to 4dp.")
+  
+```
+
+
+```{r, echo=FALSE, message=FALSE}
+predictors = colnames(abalone %>% select(-Sex, -Age))
+weights = c("WholeWeight", "ShellWeight", "ShuckedWeight", "VisceraWeight")
+abalone = abalone %>% mutate(Sex = factor(Sex))
+```
+
+## Significant Variables Per Model
+```{r abalone exhaustive search, echo=FALSE, message=FALSE, warning=FALSE}
+#this code uses and modifies abalone so we must restore it after. It also assumes abalone is like in the file, so this is fixed.
+savedAbalone = abalone
+abalone = savedAbalone
+abalone = abalone[,-which(names(abalone)=="logAge")]
+
+#removing "Rings" since we have calculated "Age" from them and are thus simply a transformed version of the Y variable in the context of regression
+abalone = abalone[,-which(names(abalone)=="Rings")]
+
+#we also remove whole weight since it is a linear combination of the shucked, viscera and shell weights (even though shells were dried this is simply a transformation of shell weight by a constant multiplier)
+abalone = abalone[,-which(names(abalone)=="WholeWeight")]
+
+
+#males & females & infants
+abaloneAll = abalone[,-1]
+exh = regsubsets(Age~., data = abaloneAll, nvmax = 9) %>% summary()
+ignore_plot = ggplot
+modelsAll = exh$outmat %>% as.data.frame()
+modelsAll = sapply(modelsAll, function(i) sapply(i, function(j) ifelse("*"%in%j, "A","")))
+
+
+#males
+abaloneMale = abalone[abalone$Sex=='Male',]
+abaloneMale = abaloneMale[,-1]
+exh = regsubsets(Age~., data = abaloneMale, nvmax = 9) %>% summary()
+models1 = exh$outmat %>% as.data.frame()
+models1 = sapply(models1, function(i) sapply(i, function(j) ifelse("*"%in%j, "M","")))
+
+#infants
+abaloneInfant = abalone[abalone$Sex=='Infant',]
+abaloneInfant = abaloneInfant[,-1]
+exh = regsubsets(Age~., data = abaloneInfant, nvmax = 9) %>% summary()
+models2 = exh$outmat %>% as.data.frame()
+models2 = sapply(models2, function(i) sapply(i, function(j) ifelse("*"%in%j, "I","")))
+
+
+#females
+abaloneFemale = abalone[abalone$Sex=='Female',]
+abaloneFemale = abaloneFemale[,-1]
+exh = regsubsets(Age~., data = abaloneFemale, nvmax = 9) %>% summary()
+models3 = exh$outmat %>% as.data.frame()
+models3 = sapply(models3, function(i) sapply(i, function(j) ifelse("*"%in%j, "F","")))
+
+
+
+models = sapply(1:dim(models1)[2], function(x) paste(models1[,x], models2[,x], models3[,x], modelsAll[,x], sep=' '))
+models = cbind(c(1:9), models)
+colnames(models) = c("Model With Number Of Predictors:", 
+                     names(abalone)[-which(names(abalone)%in%c("WholeWeight","Rings","logAge","Age","Sex"))]) %>% unlist() %>% as.vector()
+
+
+exh.tbl = models %>% 
+  kbl(caption = '<div style="text-align: center"><b>Significant Results: Exhaustive Search With & Without "Sex"</b></div>', 
+      format='html', 
+      row.names = FALSE
+      ) %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1, bold = T, border_right = T) %>%
+  column_spec(2:dim(models)[2], width='0.5cm') %>%
+  row_spec(0, font_size=11) %>%
+  footnote(general='Significant variables at each size of model for each group have been indicated by the placement of the respective group symbol; Male: M, Female: F & Infant: I. The significant variables when ignoring Sex altogether have also been indicated; Ignoring Sex: A. The variable "WholeWeight" was discluded from this search since it is by nature linearly dependant upon the other weight type variables. Similarly, "Rings" and "logAge" were discarded since they are transformations of the response variable "Age".')
+
+save(exh.tbl, file="exhaustiveTable.Rda")
+exh.tbl
+
+
+get_equations = function(model_num){
+  logical = (model_num!="") %>% as.data.frame()
+  names_vect = colnames(model_num)
+  apply(logical, 1, function(x) paste0("Age~",paste(names_vect[x],collapse="+")))
+}
+
+male_equations = get_equations(models1)
+infant_equations = get_equations(models2)
+female_equations = get_equations(models3)
+ignoring_sex_equations = get_equations(modelsAll)
+
+#restoring abalone
+abalone = savedAbalone
+```
+
+
+<br> Models using 3 or 4 predictors seemed the best compromise between number of predictors and representation across sexes. </br>
+
+```{r Regression Models, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+#Testing fit
+to_be_removed = which(names(abalone)%in%c("Sex","Rings","logAge"))
+abalone_male = abalone[abalone$Sex=="Male", -to_be_removed]
+abalone_infant = abalone[abalone$Sex=="Infant", -to_be_removed]
+abalone_female = abalone[abalone$Sex=="Female", -to_be_removed]
+abalone_all = abalone[, -to_be_removed]
+
+get_bglmnet_plot = function(sex="ignore", number_of_variables=3, B=100, seed=1, output=FALSE){
+  eq = ignoring_sex_equations[number_of_variables] %>% as.formula()
+  dat = abalone_all
+  if(sex=="male"){
+    eq = male_equations[number_of_variables] %>% as.formula()
+    dat = abalone_male
+  }
+  if(sex=="female"){
+    eq = female_equations[number_of_variables] %>% as.formula()
+    dat = abalone_female
+  }
+  if(sex=="infant"){
+    eq = infant_equations[number_of_variables] %>% as.formula()
+    dat = abalone_infant
+  }
+  print(eq)
+  lm_result = lm(eq, dat)
+  bglmnet_obj = bglmnet(lm_result, seed = seed, B = B)
+  p = plot(bglmnet_obj, axisTitlesPosition='none')
+  if(output==FALSE){
+    as_grob(p)
+  }
+  else{
+    p
+  }
+}
+```
+
+## Regression Models (Male)
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+get_bglmnet_plot(sex="male", number_of_variables=6, output=TRUE)
+```
+<br>We see that "ShellWeight", "ShuckedWeight", & "Height" contribute the most towards the model. (Row 3 of Exhaustive Search Table)</br>
+
+
+## Regression Models (Female)
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+get_bglmnet_plot(sex="female", number_of_variables=6, output=TRUE)
+```
+<br>We see that "ShellWeight", "ShuckedWeight", "Diameter", & "Height" contribute the most towards the model. (Row 4 of Exhaustive Search Table)</br>
+
+## Regression Models (Infant)
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+get_bglmnet_plot(sex="infant", number_of_variables=6, output=TRUE)
+```
+<br>We see that "ShellWeight", & "Height" contribute the most towards the model. (Row 2 of Exhaustive Search Table)</br>
+
+## Regression Models (Ignoring Sex)
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+get_bglmnet_plot(sex="ignore", number_of_variables=6, output=TRUE)
+```
+<br>We see that "ShellWeight", "ShuckedWeight", "Diameter", & "Height" contribute the most towards the model. (Row 4 of Exhaustive Search Table)</br>
+
+
+## Considering Using Only "WholeWeight"
+```{r abalone exhaustive search whole weight, echo=FALSE, message=FALSE, warning=FALSE}
+#this code uses and modifies abalone so we must restore it after. It also assumes abalone is like in the file, so this is fixed.
+savedAbalone = abalone
+abalone = savedAbalone
+abalone = abalone[,-which(names(abalone)=="logAge")]
+
+#removing "Rings" since we have calculated "Age" from them and are thus simply a transformed version of the Y variable in the context of regression
+abalone = abalone[,-which(names(abalone)=="Rings")]
+
+#we also remove whole weight since it is a linear combination of the shucked, viscera and shell weights (even though shells were dried this is simply a transformation of shell weight by a constant multiplier)
+abalone = abalone[,-which(names(abalone)%in%c("ShuckedWeight","VisceraWeight","ShellWeight"))]
+
+
+#males & females & infants
+abaloneAll = abalone[,-1]
+exh = regsubsets(Age~., data = abaloneAll, nvmax = 9) %>% summary()
+ignore_plot = ggplot
+modelsAll = exh$outmat %>% as.data.frame()
+modelsAll = sapply(modelsAll, function(i) sapply(i, function(j) ifelse("*"%in%j, "W","")))
+numberings = c(1:dim(modelsAll)[2])
+modelsAll = cbind("Model With Number Of Predictors:"=numberings, modelsAll)
+
+modelsAll %>% 
+  kbl(caption = '<div style="text-align: center"><b>Significant Results: Exhaustive Search With Combined Groups & Weights</b></div>', 
+      format='html', 
+      row.names = FALSE
+      ) %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1, bold = T, border_right = T, width='0.5cm') %>%
+  column_spec(2:dim(modelsAll)[2], width='0.5cm') %>%
+  row_spec(0, font_size=11) %>%
+  footnote(general='Significant variables at each size of model have been indicated by the placement of "W". The variables, "ShuckedWeight", "VisceraWeight", & "ShellWeight", were discluded from this search since they are by nature linearly dependant upon each other. Similarly, "Rings" and "logAge" were discarded since they are transformations of the response variable "Age".')
+
+
+get_equations = function(model_num){
+  logical = (model_num!="") %>% as.data.frame()
+  names_vect = colnames(model_num)[-1]
+  apply(logical[,-1], 1, function(x) paste0("Age~",paste(names_vect[x],collapse="+")))
+}
+
+ignoring_sex_equations_with_wholeweight = get_equations(modelsAll)
+
+lm_result_whole_weight = lm(ignoring_sex_equations_with_wholeweight[4] %>% as.formula(), abalone)
+
+#best model known in advance, easier to create here:
+lm_best_whole_weight = lm(ignoring_sex_equations_with_wholeweight[2] %>% as.formula(), abalone)
+
+bglmnet_obj = bglmnet(lm_result_whole_weight, seed = 1, B = 150)
+whole_weight_bglmnet = plot(bglmnet_obj, axisTitlesPosition='none')
+
+
+#restoring abalone
+abalone = savedAbalone
+
+
+
+
+
+
+```
+
+
+## Regression Models (Whole Weight)
+```{r bglmnet wholeweight, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+whole_weight_bglmnet
+# best model uses 2 variables
+```
+
+
+## Model Decisions {.build}
+
+>- Males age seemed to be best predicted by Row 3 of the Exhaustive Search Table.
+
+>- Females age seemed to be best predicted by Row 4 of the Exhaustive Search Table.
+
+>- Infants age seemed to need one less predictor (Row 2) than Males or Females; perhaps they were less affected by variability in growth conditions. 
+
+>- The combined model seemed to be best predicted by Row 4 of the Exhaustive Search Table.
+
+>- The whole weight model seemed to be best predicted by Row 2 of the Exhaustive Search Table for "WholeWeight" with combined groups of "Sex".
+
+>- Models were created for each.
+
+
+```{r creating models, echo=FALSE, message=FALSE, warning=FALSE}
+regression_male = lm(male_equations[3] %>% as.formula(), data=abalone[abalone$Sex=="Male",])
+regression_female = lm(female_equations[4] %>% as.formula(), data=abalone[abalone$Sex=="Female",])
+regression_infant = lm(infant_equations[2] %>% as.formula(), data=abalone[abalone$Sex=="Infant",])
+regression_combined = lm(ignoring_sex_equations[4] %>% as.formula(), data=abalone)
+regression_whole_weight = lm_best_whole_weight
+
+model_Males=regression_male$coefficients %>% as.data.frame() %>% t() %>% round(.,4)
+model_Females=regression_female$coefficients %>% as.data.frame() %>% t() %>% round(.,4)
+model_Infants=regression_infant$coefficients %>% as.data.frame() %>% t() %>% round(.,4)
+model_IgnoreSex=regression_combined$coefficients %>% as.data.frame() %>% t() %>% round(.,4)
+model_ww=lm_best_whole_weight$coefficients %>% as.data.frame() %>% t() %>% round(.,4)
+```
+## Models
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+row.names(model_Males) = "Coefficient:"
+model_Males %>%
+  kbl(caption="Model: Male", format='html') %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1:dim(model_Males)[2], width='0.5cm') %>%
+  row_spec(0,font_size = 11)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+row.names(model_Females) = "Coefficient:"
+model_Females %>%
+  kbl(caption="Model: Female", format='html') %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1:dim(model_Females)[2], width='0.5cm') %>%
+  row_spec(0,font_size = 11)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+row.names(model_Infants) = "Coefficient:"
+model_Infants %>%
+  kbl(caption="Model: Infant", format='html') %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1:dim(model_Infants)[2], width='0.5cm') %>%
+  row_spec(0,font_size = 11)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+row.names(model_IgnoreSex) = "Coefficient:"
+model_IgnoreSex %>%
+  kbl(caption="Model: Ignoring Sex", format='html') %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1:dim(model_IgnoreSex)[2], width='0.5cm') %>%
+  row_spec(0,font_size = 11)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+row.names(model_ww) = "Coefficient:"
+model_ww %>%
+  kbl(caption="Model: Whole Weight", format='html') %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1:dim(model_ww)[2], width='0.5cm') %>%
+  row_spec(0,font_size = 11)
+```
+
+## Checking Assumptions (Model: Male)
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+abalone.male = abalone[abalone$Sex=="Male",]
+autoplot(regression_male)
+```
+
+## Checking Assumptions (Model: Male, outliers removed)
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+abalone.male.outliers = abalone.male[rownames(abalone.male) != "1415",]
+regression_male_outlier = lm(male_equations[3] %>% as.formula(), data=abalone.male.outliers)
+autoplot(regression_male_outlier)
+```
+
+## Checking Assumptions (Model: Female)
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+abalone.female = abalone[abalone$Sex=="Female",]
+autoplot(regression_female)
+```
+
+## Checking Assumptions (Model: Female, no outliers)
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+abalone.female.outliers = abalone.female[rownames(abalone.female) != "163",]
+regression_female_outlier = lm(female_equations[4] %>% as.formula(), data=abalone.female.outliers)
+autoplot(regression_female_outlier)
+```
+
+## Checking Assumptions (Model: Infant)
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+abalone.infant = abalone[abalone$Sex=="Infant",]
+autoplot(regression_infant)
+```
+
+## Checking Assumptions (Model: Infant, no outliers)
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+abalone.infant.outliers = abalone.infant[rownames(abalone.infant) != "3923",]
+regression_infant_outlier = lm(infant_equations[2] %>% as.formula(), data=abalone.infant.outliers)
+autoplot(regression_infant_outlier)
+```
+
+## Checking Assumptions (Model: Ignoring Sex)
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+autoplot(regression_combined)
+```
+
+## Checking Assumptions (Model: Ignoring Sex, no outliers)
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+abalone.outliers = abalone[-c(2049, 1415, 163),]
+regression_combined_outlier = lm(ignoring_sex_equations[4] %>% as.formula(), data=abalone.outliers)
+assump.plot = autoplot(regression_combined_outlier)
+assump.plot
+save(assump.plot, file="assumptions.Rda")
+```
+
+## In-Sample Performance
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+summary_male = summary(regression_male_outlier)
+summary_female = summary(regression_female_outlier)
+summary_infant = summary(regression_infant_outlier)
+summary_ignore = summary(regression_combined_outlier)
+summary_whole_weight = summary(regression_whole_weight)
+fit_table = data.frame(Male=c(summary_male$r.squared, summary_male$adj.r.squared, summary_male$r.squared/summary_male$adj.r.squared), 
+                       Female=c(summary_female$r.squared, summary_female$adj.r.squared, summary_female$r.squared/summary_female$adj.r.squared), 
+                       Infant=c(summary_infant$r.squared, summary_infant$adj.r.squared, summary_infant$r.squared/summary_infant$adj.r.squared), 
+                       Combined_Groups=c(summary_ignore$r.squared, summary_ignore$adj.r.squared, summary_ignore$r.squared/summary_ignore$adj.r.squared),
+                       Whole_Weight=c(summary_whole_weight$r.squared, summary_whole_weight$adj.r.squared, summary_whole_weight$r.squared/summary_whole_weight$adj.r.squared))
+row.names(fit_table) = c("R^2", "R^2 adjusted", "R^2 / R^2 adjusted")
+
+fit_table %>%
+  kbl(caption="In-Sample Performance Comparison", format='html') %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1, bold = T, border_right = T) %>%
+  column_spec(2:dim(model_IgnoreSex)[2], width='0.5cm') %>%
+  row_spec(0,font_size = 11) %>%
+  footnote(general="Male, Female, & Infant models were tested & made within their respective subsets of the dataset.")
+
+```
+
+
+## Out-Of-Sample Predictive Ability
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+test_out_sample_performance = function(eq, subset_name){
+  data = abalone.outliers
+  if(subset_name=="Male"){
+    data = abalone.male.outliers
+  }
+  if(subset_name=="Female"){
+    data = abalone.female.outliers
+  }
+  if(subset_name=="Infant"){
+    data = abalone.infant.outliers
+  }
+  train(eq, data=data, method = "lm", trControl = trainControl(method = "cv", number = 10, verboseIter = FALSE))
+}
+chosen_eq = c(male_equations[3], female_equations[4], infant_equations[2], ignoring_sex_equations[4], ignoring_sex_equations_with_wholeweight[2])
+data_subsets = c("Male", "Female", "Infant", "None", "None")
+out_sample_performance = sapply(1:length(chosen_eq), function(i) test_out_sample_performance(eq=chosen_eq[i] %>% as.formula(), subset_name=data_subsets[i]))
+
+results = data.frame(out_sample_performance[,1]$results %>% t(),
+                     out_sample_performance[,2]$results %>% t(),
+                     out_sample_performance[,3]$results %>% t(),
+                     out_sample_performance[,4]$results %>% t(),
+                     out_sample_performance[,5]$results %>% t())
+
+row_names = c("Male","Female","Infant","Combined Groups","Whole Weight")
+results = results %>% t()
+results = cbind(row_names, results) 
+results = results[,-which(colnames(results)=="intercept")]
+
+ggresults = data.frame()
+for(i in 2:length(colnames(results))){
+  chunk = cbind(results[,1], results[,i], colnames(results)[i])
+  ggresults = rbind(ggresults, chunk)
+}
+colnames(ggresults) = c("Model", "Value", "Analysis")
+row.names(ggresults) = seq(1,dim(ggresults)[1],1)
+ggresults$Value = sapply(ggresults$Value, function(x) as.numeric(as.character(x)))
+
+
+ggplot(ggresults, aes(fill=Analysis, y=Value, x=Model)) + 
+  geom_bar(position="dodge", stat="identity") +
+  labs(title="Predictive Performance")
+
+```
+
+
+# Conclusion
+
+## Conclusion
+
+>- There was little benefit to be gained in model performance, either in or out of sample, when creating models to predict, "Age", given specific, "Sex". 
+>- Using "WholeWeight" gave a less accurate model compared to using "ShellWeight", "VisceraWeight", & "Shucked Weight", however not by a great deal. 
+>- In predicting the age of Abalone via a linear model, it seems reasonable to focus upon the predictors outlined in the "Combined Groups" model when accuracy is important, and the predictors outlined in the "Whole Weight" model when cost effectiveness is more important than accuracy.
+
+## Final Models
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+best_models = rbind(model_IgnoreSex, cbind(model_ww, ShuckedWeight=0,ShellWeight=0))
+
+row.names(best_models) = c("Combined Groups Model:","Whole Weight Model:")
+best_models %>%
+  kbl(caption="Best Models", format='html') %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1,bold = T) %>%
+  column_spec(1:dim(best_models)[2], width='0.5cm') %>%
+  row_spec(0,font_size = 11)
+
+```
+>- Predictions become more inaccurate as Age increases. The maximum age included in the data this model was trained upon was 30.5 years.
+
+>- For the Combined Groups Model, "ShuckedWeight", indicated youthfulness, compared to the other predictors which positively increased with Age.
+
+>- For the Whole Weight Model, we see it is very similar to the Combined Groups Model, but with two less predictors.
+
+## Final Models
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+best_models = rbind(model_IgnoreSex, cbind(model_ww, ShuckedWeight=0,ShellWeight=0))
+
+row.names(best_models) = c("Combined Groups Model:","Whole Weight Model:")
+best_models %>%
+  kbl(caption="Best Models", format='html') %>%
+  kable_styling(full_width=FALSE, font_size = 10) %>%
+  kable_paper(bootstrap_options = "striped") %>%
+  column_spec(1,bold = T) %>%
+  column_spec(1:dim(best_models)[2], width='0.5cm') %>%
+  row_spec(0,font_size = 11)
+
+```
+>- Predictions become more inaccurate as Age increases. The maximum age included in the data this model was trained upon was 30.5 years.
+
+>- For the Combined Groups Model, "ShuckedWeight", indicated youthfulness, compared to the other predictors which positively increased with Age.
+
+>- For the Whole Weight Model, we see it is very similar to the Combined Groups Model, but with two less predictors.
+
+
+
+## References {.allowframebrakes}
+<font size="1">
+[@tidyverse] [@kableExtra] [@qtlcharts] [@ggExtra] [@ggplot2] [@gridExtra] [@ggfortify] [@cowplot] [@leaps] [@mplot] [@caret]

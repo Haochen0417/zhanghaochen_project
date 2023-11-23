@@ -1,0 +1,602 @@
+---
+title: "Data_exploration"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Data set
+
+
+```{r}
+library("tidyverse")
+```
+
+```{r}
+load("abaloneClean.rda")
+```
+
+```{r}
+predictors = colnames(abalone %>% select(-Sex, -Age))
+weights = c("WholeWeight", "ShellWeight", "ShuckedWeight", "VisceraWeight")
+abalone = abalone %>% mutate(Sex = factor(Sex))
+```
+
+```{r}
+# skimr::skim(abalone)
+```
+
+# Assess normality of plots
+```{r}
+for(c in predictors)
+{
+  a = ggplot(abalone, aes_string(x=c)) + geom_histogram(bins=30)
+  b = ggplot(abalone, aes_string(y=c)) + geom_boxplot()
+  p = ggplot(abalone, aes_string(sample=c)) + stat_qq() + stat_qq_line()
+  gridExtra::grid.arrange(a, b, p, nrow=1)
+}
+
+print(ggplot(abalone, aes(x=Sex)) + geom_bar())
+```
+
+Most distributions are skewed, some outliers on qqplots of height.
+
+# Assess whether male/female/infants have similar distributions of predictors/response
+```{r}
+for(c in predictors)
+{
+  print(c)
+  eq = paste(c, "~Sex", sep="")
+  av = aov(as.formula(eq), abalone)
+  print(summary(av))
+  
+  print(ggplot(abalone, aes_string(y=c, x="Sex")) + geom_boxplot())
+}
+```
+
+```{r}
+abalone_adult = abalone %>% filter(Sex != "Infant")
+```
+
+```{r}
+for(c in predictors)
+{
+  eq = paste(c, "~Sex", sep="")
+  print(t.test(as.formula(eq), abalone_adult))
+
+  print(ggplot(abalone_adult, aes_string(y=c, x="Sex")) + geom_boxplot())
+}
+```
+
+The different populations have very different predictor/response distributions.
+
+# Linear models
+```{r}
+abalone.male = abalone %>% 
+  filter(Sex == "Male") %>%
+  select(-Sex)
+abalone.female = abalone %>% 
+  filter(Sex == "Female") %>%
+  select(-Sex)
+abalone.infant = abalone %>% 
+  filter(Sex == "Infant") %>%
+  select(-Sex)
+```
+
+Proposed models:
+```{r}
+models = c(
+  "Rings~Length+Diameter+Height",
+  "Rings~WholeWeight",
+  "Rings~Length+Diameter+Height+WholeWeight",
+  "Rings~Length+Diameter+Height+ShellWeight+ShuckedWeight",
+  "Rings~ShellWeight+ShuckedWeight",
+  "Rings~Length+Diameter+Height+ShellWeight+ShuckedWeight+VisceraWeight",
+  "Rings~ShellWeight+ShuckedWeight+VisceraWeight",
+  "Rings~Length+Diameter+Height+ShuckedWeight+VisceraWeight",
+  "Rings~ShuckedWeight+VisceraWeight",
+  "Rings~Length+Diameter+Height+ShellWeight+VisceraWeight",
+  "Rings~ShellWeight+VisceraWeight"
+)
+```
+
+Pairwise plots:
+```{r}
+pairs = matrix(c(
+  "Length", "Diameter",
+  "Height", "Length",
+  "Diameter", "Height",
+  "WholeWeight", "Length",
+  "WholeWeight", "Height",
+  "WholeWeight", "Diameter",
+  "ShuckedWeight", "VisceraWeight",
+  "ShuckedWeight", "Length",
+  "ShuckedWeight", "Height",
+  "ShuckedWeight", "Diameter",
+  "VisceraWeight", "Length",
+  "VisceraWeight", "Height",
+  "VisceraWeight", "Diameter"
+  ), ncol=2, byrow=T
+)
+```
+
+## Male
+```{r}
+lm.male = NULL
+for(i in 1:length(models))
+{
+  print(i)
+  lm_result = lm(models[i], abalone.male)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.male[[i]] = lm_result
+}
+```
+
+Diagnostic plots suggest 531 is an outlier. 
+
+```{r}
+# Removing the outlier point:
+abalone.male = abalone.male[-531, ]
+```
+```{r}
+lm.male = NULL
+for(i in 1:length(models))
+{
+  lm_result = lm(models[i], abalone.male)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.male[[i]] = lm_result
+}
+```
+
+May be a logarithmic relationship between rings and weight.
+
+```{r}
+for(i in 1:nrow(pairs))
+{
+  x = pairs[i, 1]
+  z = pairs[i, 2]
+  p = ggplot(abalone.male, aes_string(x=x, y="Rings", colour=z)) +
+      geom_point() +
+      geom_smooth(method="lm") + 
+      labs(title=paste("No. rings versus.", x, "and", z, "(colour)"))
+  print(p)
+}
+```
+
+```{r}
+for(w in weights)
+{
+  abalone.male[[paste(w, "_exp", sep="")]] = exp(abalone.male[[w]])
+}
+```
+
+New proposed models:
+```{r}
+models_exp = c(
+  "Rings~Length+Diameter+Height",
+  "Rings~WholeWeight_exp",
+  "Rings~Length+Diameter+Height+WholeWeight_exp",
+  "Rings~Length+Diameter+Height+ShellWeight_exp+ShuckedWeight_exp",
+  "Rings~ShellWeight_exp+ShuckedWeight_exp",
+  "Rings~Length+Diameter+Height+ShellWeight_exp+ShuckedWeight_exp+VisceraWeight_exp",
+  "Rings~ShellWeight_exp+ShuckedWeight_exp+VisceraWeight_exp",
+  "Rings~Length+Diameter+Height+ShuckedWeight_exp+VisceraWeight_exp",
+  "Rings~ShuckedWeight_exp+VisceraWeight_exp",
+  "Rings~Length+Diameter+Height+ShellWeight_exp+VisceraWeight_exp",
+  "Rings~ShellWeight_exp+VisceraWeight_exp"
+)
+```
+
+New pairwise plots:
+```{r}
+pairs_exp = matrix(c(
+  "Length", "Diameter",
+  "Height", "Length",
+  "Diameter", "Height",
+  "WholeWeight_exp", "Length",
+  "WholeWeight_exp", "Height",
+  "WholeWeight_exp", "Diameter",
+  "ShuckedWeight_exp", "VisceraWeight_exp",
+  "ShuckedWeight_exp", "Length",
+  "ShuckedWeight_exp", "Height",
+  "ShuckedWeight_exp", "Diameter",
+  "VisceraWeight_exp", "Length",
+  "VisceraWeight_exp", "Height",
+  "VisceraWeight_exp", "Diameter"
+  ), ncol=2, byrow=T
+)
+```
+
+```{r}
+lm.male_exp = NULL
+for(i in 1:length(models_exp))
+{
+  lm_result = lm(models_exp[i], abalone.male)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.male_exp[[i]] = lm_result
+}
+```
+
+```{r}
+for(i in 1:nrow(pairs_exp))
+{
+  x = pairs_exp[i, 1]
+  z = pairs_exp[i, 2]
+  p = ggplot(abalone.male, aes_string(x=x, y="Rings", colour=z)) +
+      geom_point() +
+      geom_smooth(method="lm") + 
+      labs(title=paste("No. rings versus.", x, "and", z, "(colour)"))
+  print(p)
+}
+```
+
+```{r}
+for(i in 1:length(lm.male))
+{
+  print(i)
+  a = summary(lm.male[[i]])
+  b = summary(lm.male_exp[[i]])
+  print(paste("MODEL A:   ", a$sigma, a$r.squared, a$adj.r.squared, sep=" "))
+  print(paste("MODEL B:   ", b$sigma, b$r.squared, b$adj.r.squared, sep=" "))
+  print("")
+}
+```
+
+Model 4 is the best model but we can drop some variables. First drop length:
+```{r}
+best.male = lm(Rings~Diameter+Height+ShellWeight+ShuckedWeight, abalone.male)
+summary(best.male)
+```
+
+This is the final model.
+
+```{r}
+abalone.male = abalone.male %>% select(all_of(colnames(abalone.female)))
+```
+
+## Female
+Assume that there is no log relationship (as we did not observe one in the males). Then we just have to test model assumptions on the proposed list.
+```{r}
+lm.female = NULL
+for(i in 1:length(models))
+{
+  print(i)
+  lm_result = lm(models[i], abalone.female)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.female[[i]] = lm_result
+}
+```
+
+Diagnostic plots suggest 621 is an outlier. 
+
+```{r}
+# Removing the outlier point:
+abalone.female = abalone.female[-621, ]
+```
+
+```{r}
+lm.female = NULL
+for(i in 1:length(models))
+{
+  lm_result = lm(models[i], abalone.female)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.female[[i]] = lm_result
+}
+```
+
+```{r}
+for(i in 1:nrow(pairs))
+{
+  x = pairs[i, 1]
+  z = pairs[i, 2]
+  p = ggplot(abalone.female, aes_string(x=x, y="Rings", colour=z)) +
+      geom_point() +
+      geom_smooth(method="lm") + 
+      labs(title=paste("No. rings versus.", x, "and", z, "(colour)"))
+  print(p)
+}
+```
+
+```{r}
+for(i in 1:length(lm.female))
+{
+  print(i)
+  a = summary(lm.female[[i]])
+  print(paste("MODEL:   ", a$sigma, a$r.squared, a$adj.r.squared, sep=" "))
+  print("")
+}
+```
+
+Model 4/6 are the best models.
+
+Model 4 with length dropped:
+```{r}
+res = lm(Rings~Diameter+Height+ShellWeight+ShuckedWeight, abalone.female)
+summary(res)
+```
+Drop diameter too:
+```{r}
+res = lm(Rings~Height+ShellWeight+ShuckedWeight, abalone.female)
+summary(res)
+```
+
+Model 6 with VisceraWeight dropped:
+```{r}
+best.female = lm(Rings~Length+Diameter+Height+ShellWeight+ShuckedWeight, abalone.female)
+summary(best.female)
+```
+
+This is the best model for the female population.
+
+## Infant
+Assume that there is no log relationship (as we did not observe one in the males). Then we just have to test model assumptions on the proposed list.
+```{r}
+lm.infant = NULL
+for(i in 1:length(models))
+{
+  print(i)
+  lm_result = lm(models[i], abalone.infant)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.infant[[i]] = lm_result
+}
+```
+
+Diagnostic plots suggest 312 is an outlier. 
+
+```{r}
+# Removing the outlier point:
+abalone.infant = abalone.infant[-312, ]
+```
+
+```{r}
+lm.infant = NULL
+for(i in 1:length(models))
+{
+  lm_result = lm(models[i], abalone.infant)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.infant[[i]] = lm_result
+}
+```
+
+1246 may also be an outlier
+```{r}
+# Removing the outlier point:
+abalone.infant = abalone.infant[-1246, ]
+```
+
+```{r}
+lm.infant = NULL
+for(i in 1:length(models))
+{
+  lm_result = lm(models[i], abalone.infant)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.infant[[i]] = lm_result
+}
+```
+
+```{r}
+for(i in 1:nrow(pairs))
+{
+  x = pairs[i, 1]
+  z = pairs[i, 2]
+  p = ggplot(abalone.infant, aes_string(x=x, y="Rings", colour=z)) +
+      geom_point() +
+      geom_smooth(method="lm") + 
+      labs(title=paste("No. rings versus.", x, "and", z, "(colour)"))
+  print(p)
+}
+```
+
+```{r}
+for(i in 1:length(lm.infant))
+{
+  print(i)
+  a = summary(lm.infant[[i]])
+  print(paste("MODEL:   ", a$sigma, a$r.squared, a$adj.r.squared, sep=" "))
+}
+```
+
+Model 4/6 are the best models.
+
+Model 4 with length dropped:
+```{r}
+res = lm(Rings~Diameter+Height+ShellWeight+ShuckedWeight, abalone.infant)
+summary(res)
+```
+
+Drop diameter too:
+```{r}
+res = lm(Rings~Height+ShellWeight+ShuckedWeight, abalone.infant)
+summary(res)
+```
+
+Model 6 with VisceraWeight dropped:
+```{r}
+res = lm(Rings~Length+Diameter+Height+ShellWeight+ShuckedWeight, abalone.infant)
+summary(res)
+```
+
+Model 6 with Length dropped:
+```{r}
+res = lm(Rings~Diameter+Height+ShellWeight+ShuckedWeight, abalone.infant)
+summary(res)
+```
+
+Model 6 with Diameter dropped:
+```{r}
+best.infant = lm(Rings~Height+ShellWeight+ShuckedWeight, abalone.infant)
+summary(best.infant)
+```
+
+This is the same as Model 4 following variable selection, and is the best model for infants.
+
+
+## Adults
+```{r}
+abalone.adults = rbind(abalone.male, abalone.female)
+```
+
+```{r}
+lm.adults = NULL
+for(i in 1:length(models))
+{
+  print(i)
+  lm_result = lm(models[i], abalone.adults)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.adults[[i]] = lm_result
+}
+```
+
+```{r}
+abalone.adults = abalone.adults[-2148,]
+```
+
+```{r}
+lm.adults = NULL
+for(i in 1:length(models))
+{
+  print(i)
+  lm_result = lm(models[i], abalone.adults)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.adults[[i]] = lm_result
+}
+```
+
+```{r}
+abalone.adults = abalone.adults[-531,]
+```
+
+```{r}
+lm.adults = NULL
+for(i in 1:length(models))
+{
+  print(i)
+  lm_result = lm(models[i], abalone.adults)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.adults[[i]] = lm_result
+}
+```
+
+```{r}
+for(i in 1:length(lm.adults))
+{
+  print(i)
+  a = summary(lm.adults[[i]])
+  print(paste("MODEL:   ", a$sigma, a$r.squared, a$adj.r.squared, sep=" "))
+}
+```
+
+Model 4 without Length:
+```{r}
+res = lm(Rings~Diameter+Height+ShellWeight+ShuckedWeight, abalone.adults)
+summary(res)
+```
+
+Model 6 without Length:
+```{r}
+res = lm(Rings~Diameter+Height+ShellWeight+ShuckedWeight+VisceraWeight, abalone.adults)
+summary(res)
+```
+
+Model 6 without VisceraWeight:
+```{r}
+best.adults = lm(Rings~Diameter+Height+ShellWeight+ShuckedWeight, abalone.adults)
+summary(best.adults)
+```
+
+Best model for adults.
+
+## Entire population
+```{r}
+abalone.full = rbind(abalone.male, abalone.female, abalone.infant)
+```
+
+```{r}
+lm.full = NULL
+for(i in 1:length(models))
+{
+  print(i)
+  lm_result = lm(models[i], abalone.full)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.full[[i]] = lm_result
+}
+```
+
+```{r}
+abalone.full = abalone.full[-2148,]
+```
+
+```{r}
+lm.full = NULL
+for(i in 1:length(models))
+{
+  print(i)
+  lm_result = lm(models[i], abalone.full)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.full[[i]] = lm_result
+}
+```
+
+```{r}
+abalone.full = abalone.full[-531,]
+```
+
+```{r}
+lm.full = NULL
+for(i in 1:length(models))
+{
+  print(i)
+  lm_result = lm(models[i], abalone.full)
+  print(summary(lm_result))
+  plot(lm_result)
+  lm.full[[i]] = lm_result
+}
+```
+
+```{r}
+for(i in 1:length(lm.full))
+{
+  print(i)
+  a = summary(lm.full[[i]])
+  print(paste("MODEL:   ", a$sigma, a$r.squared, a$adj.r.squared, sep=" "))
+}
+```
+
+Model 4 without Length:
+```{r}
+res = lm(Rings~Diameter+Height+ShellWeight+ShuckedWeight, abalone.full)
+summary(res)
+```
+
+Model 6 without VisceraWeight:
+```{r}
+res = lm(Rings~Length+Diameter+Height+ShellWeight+ShuckedWeight, abalone.full)
+summary(res)
+```
+
+Model 6 without Length:
+```{r}
+best.full = lm(Rings~Diameter+Height+ShellWeight+ShuckedWeight, abalone.full)
+summary(best.full)
+```
+
+```{r}
+summary(lm(Rings~Diameter+Height+ShuckedWeight, abalone.full))
+```
+

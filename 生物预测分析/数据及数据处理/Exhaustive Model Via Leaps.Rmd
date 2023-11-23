@@ -1,0 +1,68 @@
+---
+title: "Exhaustive Model Via Leaps"
+author: '490430479'
+date: "08/11/2020"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(leaps)
+library(kableExtra)
+```
+
+```{r Loading Data, echo=FALSE, message=FALSE, warning=FALSE}
+load("abaloneClean.rda")
+abalone = abaloneClean
+#removing "Rings" since we have calculated "Age" from them and are thus simply a transformed version of the Y variable in the context of regression
+abalone = abalone[,-9]
+```
+
+Using an exhaustive search for the variables in the best model per each of the groups in "Sex" yields:
+
+```{r abalone exhaustive search, echo=FALSE, message=FALSE, warning=FALSE}
+
+#males
+abaloneMale = abalone[abalone$Sex=='Male',]
+abaloneMale = abaloneMale[,-1]
+exh = regsubsets(Age~., data = abaloneMale, nvmax = 9)
+models1 = summary(exh)$outmat %>% as.data.frame()
+models1 = sapply(models1, function(i) sapply(i, function(j) ifelse("*"%in%j, "Male","")))
+
+#infants
+abaloneInfant = abalone[abalone$Sex=='Infant',]
+abaloneInfant = abaloneInfant[,-1]
+exh = regsubsets(Age~., data = abaloneInfant, nvmax = 9)
+models2 = summary(exh)$outmat %>% as.data.frame()
+models2 = sapply(models2, function(i) sapply(i, function(j) ifelse("*"%in%j, "Infant","")))
+
+
+#females
+abaloneFemale = abalone[abalone$Sex=='Female',]
+abaloneFemale = abaloneFemale[,-1]
+exh = regsubsets(Age~., data = abaloneFemale, nvmax = 9)
+models3 = summary(exh)$outmat %>% as.data.frame()
+models3 = sapply(models3, function(i) sapply(i, function(j) ifelse("*"%in%j, "Female","")))
+
+
+
+models = sapply(1:dim(models1)[2], function(x) paste(models1[,x], models2[,x], models3[,x], sep='  '))
+models = cbind(c(1:9), models)
+colnames(models) = c("Model With Number Of Predictors:", names(abalone)[c(-1,-9)]) %>% unlist() %>% as.vector()
+
+models %>% 
+  kbl(caption = '<div style="text-align: center"><b>Significant Exhaustive Search Results By "Sex"</b></div>', 
+      format='html', 
+      row.names = FALSE
+      ) %>%
+  kable_styling(full_width=TRUE, font_size = 12) %>%
+  column_spec(1, bold = T, border_right = T) %>%
+  footnote(general='Significant variables at each size of model for each group have been indicated by the placement of the respective group name (Male, Female, or Infant).')
+```
+
+
+
+
+

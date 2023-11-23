@@ -1,0 +1,258 @@
+---
+title: Regression Modelling Of Abalone Age
+
+author:
+  - name: T09ol_ontime_5
+
+    
+# Optional: line of arbitrary text with additional information.
+# Could be used, for example, to mention the bibliographic info in a post-print.
+# If not specified, defaults to "This version was compiled on \today"
+#date_subtitle: Published in *Journal of Statistical Software*, 2018
+# For footer text  TODO(fold into template, allow free form two-authors)
+lead_author_surname: T09ol_ontime_5
+
+# Place eg a DOI URL or CRAN Package URL here
+doi_footer: "https://github.sydney.edu.au/jixu4558/T09ol_ontime_5"
+
+# Abstract
+abstract: |
+  Measuring the age of a given abalone is a time consuming task, thus, this report aimed to determine how accurately one could predict the age of a given abalone using variables (henceforth 'predictors') from an abalone data set. Two regression models for the age of abalone were determined to be the best models when considering two different scenarios; where destructive abalone testing was acceptable, & where destructive abalone testing was not acceptable. Predictors obtained by destructive testing produced models with the least error (ignoring subpopulation models), whereas predictors obtained by non-destructive testing produced models with greater error. When the response variable, abalone age, increased, it was found that so too did the error in the relationship of predictors to response. Significant differences in the distributions of response and predictor variables between groups infant, mature male, & mature female abalone were determined via ANOVA, however, the accuracy gained by fitting regression models groupwise was trivial.  
+
+
+# Paper size for the document, values of letter and a4
+papersize: letter
+
+# Font size of the document, values of 9pt (default), 10pt, 11pt and 12pt
+fontsize: 9pt
+
+# Optional: Force one-column layout, default is two-column
+#one_column: true
+
+# Optional: Enables lineno mode, but only if one_column mode is also true
+#lineno: true
+
+# Optional: Enable one-sided layout, default is two-sided
+#one_sided: true
+
+# Optional: Enable section numbering, default is unnumbered
+#numbersections: true
+
+# Optional: Specify the depth of section number, default is 5
+#secnumdepth: 5
+
+# Optional: Skip inserting final break between acknowledgements, default is false
+skip_final_break: true
+
+# Optional: Bibliography 
+bibliography: bibliography
+
+# Optional: Enable a 'Draft' watermark on the document
+#watermark: true
+
+# Customize footer, eg by referencing the vignette
+footer_contents: ""
+
+# Produce a pinp document
+output: pinp::pinp
+
+header-includes:
+  - \usepackage{graphicx}
+
+
+# Required: Vignette metadata for inclusion in a package.
+vignette: >
+  %\VignetteEngine{knitr::rmarkdown}
+---
+
+```{r setup, include=FALSE, echo=FALSE, message=FALSE}
+set.seed(1)
+knitr::opts_chunk$set(echo = TRUE)
+library("tidyverse")
+library("kableExtra")
+library("qtlcharts")
+library("ggExtra")
+library("ggplot2")
+library("ggfortify")
+library("gridExtra")
+library("cowplot")
+library("leaps")
+library("mplot")
+library("caret")
+library("magick")
+library("webshot")
+
+lib_list = c("tidyverse","kableExtra","qtlcharts","ggExtra","ggplot2","gridExtra","ggfortify","cowplot","leaps","mplot", "caret", "magick", "webshot")
+citation_libraries = sapply(lib_list, function(x) citation(x) %>% toBibtex())
+print_cited_libraries = function(libs){
+  for(x in libs){
+    print(x)
+  }
+}
+```
+
+```{r, include=FALSE, echo=FALSE, message=FALSE}
+load("../exhaustiveTable.Rda")
+load("../assumptions.Rda")
+load("../abaloneStability.rda")
+```
+
+
+## Introduction
+
+This report had a singular aim; to determine how accurately one could predict the response variable, age of a given abalone, using predictors found in the data set. To achieve this, three tasks were created:
+
+>- Determining whether producing regression models per subpopulation (the groups infant, male, female found in the "Sex" predictor) would give significant advantages in accuracy & efficiency over modelling across the entire population.
+
+>- Determining the best models, destructive and non-destructive, for predicting abalone age; that is, determining the best model when considering only the predictor "WholeWeight" out of the weight type predictors, and determining the best model when considering all weight type predictors except "WholeWeight".
+
+>- Investigating the predictive performance of the best models and analysing the error involved in predictions across age.
+
+\vfill\null
+
+\break
+
+## Data Set
+
+The data set came from an original (non-machine-learning) study [@warwick_j_nash_population_1994]. It contained variables outlined in \emph{Table 1.} and had 4176 entries prior to cleaning, reduced to 4170 entries after cleaning.
+
+```{r Data Import, include=FALSE, echo=FALSE, message=FALSE}
+abalone = read.csv("https://archive.ics.uci.edu/ml/machine-learning-databases/abalone/abalone.data",
+                   col.names = c("Sex", "Length", "Diameter", "Height", "WholeWeight", "ShuckedWeight", "VisceraWeight", "ShellWeight", "Rings"))
+abalone = abalone %>% mutate(
+  Sex = case_when(
+    Sex == "M" ~ "Male",
+    Sex == "F"~ "Female",
+    Sex == "I" ~ "Infant"
+  ),
+  Age = Rings + 1.5
+)
+```
+```{r variables Table, echo=FALSE, cache=TRUE}
+descriptor = c('Infant, Male, or Female','Longest shell measurement (mm)','Perpendicular to length (mm)','With meat in shell (mm)', 'Whole abalone (g)', 'Weight of meat (g)', 'Gut weight (after bleeding) (g)', 'After being dried (g)', '+1.5 Gives the age in years', '*see below')
+out = cbind(names(abalone), descriptor) %>% 
+  kbl(booktabs = T, caption='Variables Of Data Set', col.names = c('Name','Description'), format='latex') %>% 
+  footnote(general='*Age was calculated from Rings in this report and not part of the original data set.') %>%
+  column_spec(2, width='4cm') %>%
+  column_spec(1, width='2cm') %>%
+  kable_styling(bootstrap_options = "striped", 
+                latex_options = c("hold_position"), 
+                font_size = 7, 
+                full_width = FALSE)
+out
+```
+
+## Analysis
+As part of our EDA, we performed an ANOVA to compare the means of each of the independent variables in different-sex groups. As the differences in the means of each were significant across the groups, we decided to produce a model for both the full population and each group of the population selected by sex.
+
+```{r echo = FALSE, fig.fullwidth=F, fig.width = 4, fig.height = 2.5}
+plot(abalone.full.vis, which = "vip", max.circle = 7, seed = 1, width = 200,height = 100)
+```
+We performed an exhaustive search of all models to determine the best model for each group allowing for different numbers of parameters. Using bglmnet, we determined bootstrapped selection probabilities for each of the variables. 
+
+```{r echo = FALSE, fig.width=7.9, fig.height=5, out.width="80%"}
+grid.arrange(plot(abalone.full1.af, best.only = FALSE, legend.position = "bottom", model.wrap=2),
+             plot(abalone.full2.af, best.only = FALSE, legend.position = "bottom", model.wrap=2))
+```
+
+Then using mplot with an adaptive fence procedure, using 80 bootstrap samples over a grid of 100 parameter values we determined the most stable models when considering only "WholeWeight" (Top) from the weight type variables, and when considering only "ShellWeight", "ShuckedWeight", and "VisceraWeight" (Bottom) from the weight type variables.
+
+
+
+
+
+```{r echo = FALSE, fig.width=7.9, fig.height=5, out.width="80%"}
+assump.plot
+```
+
+Having selected these models, we used diagnostic plots to perform assumption checking. Linearity, homoscedasticity and normality (due to sample size) assumptions were satisfied, and high-leverage outlier points were identified and removed. When re-running the above steps with the outliers removed we obtained the same models. 
+
+
+
+
+
+
+```{r echo = FALSE, fig.width=4.5, fig.height=3, fig.fullwidth=TRUE, one_column=TRUE}
+
+abalone.male = abalone[abalone$Sex=="Male",]
+abalone.male.outliers = abalone.male[rownames(abalone.male) != "1415",]
+regression_male_outlier = lm(Age~Height+ShuckedWeight+ShellWeight , data=abalone.male.outliers)
+abalone.female = abalone[abalone$Sex=="Female",]
+abalone.female.outliers = abalone.female[rownames(abalone.female) != "163",]
+regression_female_outlier = lm(Age~Length+Diameter+ShuckedWeight+ShellWeight, data=abalone.female.outliers)
+abalone.infant = abalone[abalone$Sex=="Infant",]
+abalone.infant.outliers = abalone.infant[rownames(abalone.infant) != "3923",]
+regression_infant_outlier = lm(Age~Height+ShellWeight, data=abalone.infant.outliers)
+abalone.outliers = abalone[-c(2049, 1415, 163),]
+regression_combined_outlier = lm(Age~Diameter+Height+ShuckedWeight+ShellWeight, data=abalone.outliers)
+summary_male = summary(regression_male_outlier)
+summary_female = summary(regression_female_outlier)
+summary_infant = summary(regression_infant_outlier)
+summary_ignore = summary(regression_combined_outlier)
+
+resm=regression_male_outlier$residuals
+rmse.male=sqrt(sum(resm^2/1522)) 
+mse.male=sum(abs(resm)/1522)
+rsquare.male=summary_male$r.squared
+adjrsquare.male=summary_male$adj.r.squared
+
+
+resf=regression_female_outlier$residuals
+rmse.female=sqrt(sum(resf^2/1301)) 
+mse.female=sum(abs(resf)/1301)
+rsquare.female=summary_female$r.squared
+adjrsquare.female=summary_female$adj.r.squared
+
+resi=regression_infant_outlier$residuals
+rmse.infant=sqrt(sum(resi^2/1332)) 
+mse.infant=sum(abs(resi)/1332)
+rsquare.infant=summary_infant$r.squared
+adjrsquare.infant=summary_infant$adj.r.squared
+
+resc=regression_combined_outlier$residuals
+rmse.combine=sqrt(sum(resc^2/4162)) 
+mse.combine=sum(abs(resc)/4162)
+rsquare.combine=summary_ignore$r.squared
+adjrsquare.combine=summary_ignore$adj.r.squared
+
+maler = c(rmse.male,mse.male,rsquare.male,adjrsquare.male)
+femaler=c(rmse.female,mse.female,rsquare.female,adjrsquare.female)
+dd<-data.frame(MSE=c(mse.male,mse.female,mse.infant,mse.combine),RMSE=c(rmse.male,rmse.female,rmse.infant,rmse.combine),Rsquared=c(rsquare.male,rsquare.female,rsquare.infant,rsquare.combine),adjRsquared=c(adjrsquare.male,adjrsquare.female,adjrsquare.infant,adjrsquare.combine))
+ddd<-data.frame(Value=c(rmse.male,mse.male,rsquare.male,adjrsquare.male,rmse.female,mse.female,rsquare.female,adjrsquare.female,rmse.infant,mse.infant,rsquare.infant,adjrsquare.infant,rmse.combine,mse.combine,rsquare.combine,adjrsquare.combine),sex=c("M","M","M","M","F","F","F","F","I","I","I","I","C","C","C","C"),errortype=c("RMSE","MSE","R-Square","adj-R-square","RMSE","MSE","R-Square","adj-R-square","RMSE","MSE","R-Square","adj-R-square","RMSE","MSE","R-Square","adj-R-square"))
+malebar=ggplot(data=ddd,aes(x=sex,y=Value,fill=errortype))+geom_bar(stat="identity")+facet_grid(cols=vars(errortype))
+malebar
+```
+
+
+
+
+## Results
+The $R^2$ value for the combined population model was 0.5181, indicating around half of the variance in the age variable was explained by our model. This was likely due to the presence of moderate amounts of noise in the data.
+
+There was generally little difference in the out-of-sample predictive ability - measured using mean absolute error and mean squared error - between models for different groups. There was little to no improvement using models per Sex versus a model ignoring Sex, although it was worth noting that the model for the infant group performed somewhat better than male and female. Because the balance of sexes in the data was roughly even, this may be why the overall population model performed similar to, or better than, individual models for the male and female populations.
+
+## Discussion and conclusion
+Our analysis of the data was mainly limited by the presence of the noise in the response variable. Additionally, there appeared to be relatively high variance in the independent variables of diameter, height and weight within the adult population and low correlation with age, when compared with the infant population. Infant abalones are still growing, unlike adult abalones, which may explain why measures of their size were so much more strongly associated with their age.
+
+All in all, we were able to use mplot to perform an exhaustive search of models and select a subset of independent variables which produced a stable model. The model we chose performed reasonably well at predicting values of the age of an abalone given physical measurements despite the presence of noise in the dataset.
+
+
+<!-- ```{r echo = FALSE, fig.width=6, fig.height=3, out.extra='angle=-90'}
+plot(abalone.full.vis, which = "boot", max.circle = 7, seed = 1)
+```-->
+
+<!-- # ```{r echo = FALSE, fig.width=6.2, fig.height=4, out.width="80%"} -->
+<!-- # plot(abalone.best2.af, best.only = TRUE, legend.position = "bottom") -->
+<!-- # ``` -->
+
+<!-- # ```{r echo = FALSE, fig.width=6, fig.height=3, out.extra='angle=-90'} -->
+<!-- # plot(abalone.full.vis, which = "boot", max.circle = 7, seed = 1) -->
+<!-- # ``` -->
+
+<!-- # ```{r echo = FALSE, fig.width=6, fig.height=3, out.extra='angle=-90'} -->
+<!-- # plot(abalone.full.vis, which = "lvk", max.circle = 7, seed = 1) -->
+<!-- # ``` -->
+
+
+
+
